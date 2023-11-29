@@ -5,10 +5,11 @@ import lightning as pl
 from torch.utils.data import DataLoader
 from torch.utils.data import IterableDataset
 
-from datamodules.datasets.mapstyle import MapStyleDataset, VQAMapStyleDataset
+from datamodules.datasets.mapstyle import MapStyleDataset
+from datamodules.datasets.dataclass import Items
 
 class DataModule(pl.LightningDataModule):
-    DATASETS = {"mapstyle", "webdataset"}
+    DATASETS = "mapstyle"
 
     def __init__(
         self, cfg,
@@ -44,14 +45,13 @@ class DataModule(pl.LightningDataModule):
         self.data_train: Optional[IterableDataset] = None
         self.data_val: Optional[IterableDataset] = None
         self.data_test: Optional[IterableDataset] = None
+        self.data_overfit: Optional[IterableDataset] = None
 
 
     def setup(self):
         """Load data. Set variables: self.data_train, self.data_val, self.data_test."""
         if self.ds_type == "mapstyle":
             ds = MapStyleDataset
-        elif self.ds_type == "webdataset":
-            ds = WebDatasetPartitionedShard
         else:
             raise ValueError("this should be detected in __init__()")
 
@@ -100,6 +100,22 @@ class DataModule(pl.LightningDataModule):
                 is_test=True
             )
 
+        # Custome data overfit
+        self.data_overfit = ds(
+            name=self.ds_name,
+            loc=self.ds_loc,
+            split="overfit",
+            transform=self.train_transform,
+            tokenizer_type=self.tokenizer_type,
+            bpe_pdrop=self.bpe_pdrop,
+            seed=self.seed,
+            shuffle=self.shuffle,
+            epoch=self.epoch,
+            text_ctx=self.text_ctx,
+            total_gpus=self.total_gpus,
+            gt_text=self.gt_text
+        )
+
 
     def train_dataloader(self):
         return DataLoader(
@@ -127,6 +143,17 @@ class DataModule(pl.LightningDataModule):
             pin_memory=self.pin_memory,
             collate_fn=Items
         )
+    
+    def overfit_dataloader(self):
+        return DataLoader(
+            dataset=self.data_overfit,
+            batch_size=self.train_batch_size,
+            num_workers=self.num_workers,
+            pin_memory=self.pin_memory,
+            collate_fn=Items
+        )
+
+        
 
     def set_train_epoch(self, epoch):
         self.data_train.set_epoch(epoch)
