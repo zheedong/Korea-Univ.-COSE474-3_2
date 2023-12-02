@@ -1,14 +1,58 @@
 import os
 import torch
 import lightning as pl
-from transformers import BartTokenizer, BartForConditionalGeneration, BartConfig
+
+from transformers import AutoTokenizer, T5ForConditionalGeneration, T5Config
 from datamodules import build_datamodule, build_transform
 from visual_bart.utils.config import build_config
 from vqgan.vqgan import VQGAN
 from torch.optim.lr_scheduler import StepLR, ReduceLROnPlateau
 import pdb
 
-class CustomBartModel(pl.LightningModule):
+def resize_tok_embeddings(model, new_voca_size, text_vocab_size):
+    """_summary_
+
+    Args:
+        model (_type_): _description_
+        new_voca_size (_type_): _description_
+    """
+    # Increase shared
+    old_tok_embeddings = model.shared
+    new_tok_embeddings = torch.nn.Embedding(
+        new_voca_size, old_tok_embeddings.weight.shape[1]
+    )
+
+    new_tok_embeddings.weight.data[:text_vocab_size] = old_tok_embeddings.weight.data
+    model.shared = new_tok_embeddings
+
+    # Increase encoder
+    old_tok_embeddings = model.encoder.embed_tokens
+    new_tok_embeddings = torch.nn.Embedding(
+        new_voca_size, old_tok_embeddings.weight.shape[1]
+    )
+
+    new_tok_embeddings.weight.data[:text_vocab_size] = old_tok_embeddings.weight.data
+    model.encoder.embed_tokens = new_tok_embeddings
+
+    # Increase Decoder
+    old_tok_embeddings = model.decoder.embed_tokens
+    new_tok_embeddings = torch.nn.Embedding(
+        new_voca_size, old_tok_embeddings.weight.shape[1]
+    )
+
+    new_tok_embeddings.weight.data[:text_vocab_size] = old_tok_embeddings.weight.data
+    model.decoder.embed_tokens = new_tok_embeddings
+
+    # Increase lm head
+    old_lm_head = model.lm_head
+    new_lm_head = torch.nn.Linear(
+        old_lm_head.weight.shape[1], new_voca_size
+    )
+
+    new_lm_head.weight.data[:text_vocab_size] = old_lm_head.weight.data
+    model.lm_head = new_lm_head
+
+class CustomT5Model(pl.LightningModule):
     def __init__(self, cfg, model, tokenizer):
         super().__init__()
         self.model = model
@@ -119,13 +163,13 @@ if __name__ == "__main__":
 
     vqgan_n_embed = cfg.vqgan.n_embed
 
-    tokenizer = BartTokenizer.from_pretrained('facebook/bart-large')
-    config = BartConfig.from_pretrained('facebook/bart-large')
-    model = BartForConditionalGeneration.from_pretrained('facebook/bart-large', config=config)
+    tokenizer = AutoTokenizer.from_pretrained('t5-small')
+    config = T5Config.from_pretrained('t5-small')
+    model = T5ForConditionalGeneration.from_pretrained('t5-small')
 
-    original_num_tokens = model.lm_head.out_features
-    model.shared = torch.nn.Embedding(original_num_tokens + vqgan_n_embed, config.d_model, padding_idx=1)
-    model.resize_token_embeddings(original_num_tokens + vqgan_n_embed)
+    pdb.set_trace()
+    original_num_tokens = config.vocab_size
+    resize_tok_embeddings(model, original_num_tokens + vqgan_n_embed, original_num_tokens)
 
 
     val_transform = build_transform(
@@ -150,5 +194,5 @@ if __name__ == "__main__":
     #train_dataloader = datamodule.overfit_dataloader()
 
     trainer = pl.Trainer(max_epochs=100, accelerator='gpu', log_every_n_steps=1, check_val_every_n_epoch=1)
-    bart_model = CustomBartModel(cfg, model, tokenizer)
-    trainer.fit(bart_model, train_dataloader, val_dataloader)
+    t5_model = CustomT5Model(cfg, model, tokenizer)
+    trainer.fit(t5_model, train_dataloader, val_dataloader)

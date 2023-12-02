@@ -49,11 +49,9 @@ class MapStyleDataset(VisionDataset, TokenizerUtils):
             data_list = []
             if split == "overfit":
                 data_list.append(CocoCaptions(root=f'{self.root}/images/train2014', annFile=f'{self.root}/annotations/captions_{split}2014.json'))
-                import pdb; pdb.set_trace()
             elif split == "test":
                 data_list.append(CocoCaptions(root=f'{self.root}/images/val2014', annFile=f'{self.root}/annotations/dataset_coco_test.json'))
             else:
-                import pdb; pdb.set_trace()
                 data_list.append(CocoCaptions(root=f'{self.root}/images/{split}2014',
                                               annFile=f'{self.root}/annotations/captions_{split}2014.json'))
             self.items = ConcatDataset(data_list)

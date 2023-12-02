@@ -1,0 +1,74 @@
+cfg_path: ???
+result_path: ???
+result_file_path: ???
+checkpoint_path: ???
+eval: False
+resume: False
+finetune: False
+
+dist:
+  n_gpus: 1
+  n_nodes: 1
+
+dataset:
+  type: maystyle
+  name: coco2014
+  loc: local
+  num_workers: 4
+  shuffle: True
+  tokenizer:
+    type: ClipBPE
+    hparams:
+      context_length: 64
+      bpe_pdrop: 0.1
+  transform:
+    type: dalle-vqvae
+    hparams:
+      resolution: 256
+  gt_text: False
+
+experiment:
+  seed: 0
+  local_batch_size: 16
+  total_batch_size: 1024
+  val_batch_size: 16
+  ckpt_save_interval: 3000
+  max_steps: 300000
+  max_epochs: 100
+  every_n_epochs: 1
+  val_check_interval: 3000
+  img_log_interval: 3000
+  log_every_n_steps: 10
+  sample_method: beam # [rerank, beam, sample]
+  sample_size: 5
+  max_length: 32
+  top_k: 32
+  top_p: 1.0
+  temperature: 0.5
+  num_cand_text_samples: 64
+  length_penalty: 1.0
+  strategy:
+    type: zero1 # [ddp, zero1, zero2, zero3]
+    offload_optimizer: False
+    offload_parameters: False
+  label_smoothing_for_txt: 0.0
+  label_smoothing_for_img: 0.0
+  test_split: 'test'
+  masked_loss: False
+
+vqgan:
+  type: vqgan
+  embed_dim: 256
+  n_embed: 1024
+  hparams:
+    double_z: False
+    z_channels: 256
+    resolution: 256
+    in_channels: 3
+    out_ch: 3
+    ch: 128
+    ch_mult: [1, 1, 2, 2, 4]
+    num_res_blocks: 2
+    attn_resolutions: [16]
+    pdrop: 0.0
+  path: vqgan_checkpoints/vqgan_imagenet_f16_1024/ckpts/last.ckpt

@@ -21,7 +21,7 @@ def to_attr_dict(cfg):
     return cfg
 
 def build_config(struct=False):
-    cfg = OmegaConf.load('./configs/default.yaml')
+    cfg = OmegaConf.load('./configs/default_vqgan_1024.yaml')
     OmegaConf.set_struct(cfg, struct)
     cfg = override_from_file_name(cfg)
     cfg = override_from_cli(cfg)
