@@ -8,7 +8,6 @@ from visual_bart.utils.config import build_config
 from vqgan.vqgan import VQGAN
 from torch.optim.lr_scheduler import StepLR, ReduceLROnPlateau
 import pdb
-from PIL import Image
 
 def resize_tok_embeddings(model, new_voca_size, text_vocab_size):
     """_summary_
@@ -67,7 +66,6 @@ class CustomT5Model(pl.LightningModule):
         self.tokenizer = tokenizer
         self.criterion = torch.nn.CrossEntropyLoss()
         self.original_num_tokens = cfg.original_num_tokens
-        self.vqgan_codebook_size = cfg.vqgan.n_embed
 
     def load_vqgan(self, model_vqvae, ckpt_path):
         if isinstance(model_vqvae, VQGAN):
@@ -85,47 +83,45 @@ class CustomT5Model(pl.LightningModule):
             vqvae_ckpt = torch.load(ckpt_path, map_location=self.device)['state_dict']
             model_vqvae.load_state_dict(vqvae_ckpt)
         return model_vqvae
-    
-    def image_generate(self, vqgan_token):
-
-        zshape = (1, 256, 16, 16)
-        bhwc = (zshape[0],zshape[2],zshape[3],zshape[1])
-
-        quant = self.model_vq.quantize.get_codebook_entry(vqgan_token, shape=bhwc)
-        dec = self.model_vq.decode(quant)
-
-        return dec[0]
-
-    def save_image(self, x, path):
-        c,h,w = x.shape
-        assert c==3
-        x = ((x.detach().cpu().numpy().transpose(1,2,0)+1.0)*127.5).clip(0,255).astype(np.uint8)
-        Image.fromarray(x).save(path)
 
     def forward(self, batch_img, batch_gt_txt):
+        pdb.set_trace()
         # [b, 256] image tokens
-        labels = self.model_vq.get_codes(batch_img).to(self.device)
-        labels += self.original_num_tokens
+        token_batch_img = self.model_vq.get_codes(batch_img).to(self.device)
+        token_batch_img += self.original_num_tokens
 
         # Process each item in the batch
         input_ids = []
+        attention_masks = []
+        labels = []
         for batch_idx, gt_txt in enumerate(batch_gt_txt):
             # Encode text
-            text_tokens = self.tokenizer(gt_txt, add_special_tokens=False, return_tensors="pt").input_ids
-            # Add padding
-            text_tokens = torch.nn.functional.pad(text_tokens, (0, 128 - text_tokens.shape[1]), mode='constant', value=0)
-            input_ids.append(text_tokens)
+            text_tokens = self.tokenizer.encode(gt_txt, add_special_tokens=False)
 
-        # Stack the list as a tensor
-        input_ids = torch.stack(input_ids, dim=0).squeeze(1).to(self.device)
+            # Concatenate text tokens with image tokens
+            combined_tokens = text_tokens + token_batch_img[batch_idx].tolist()
+
+            # Create attention mask (1s for text tokens, 0s for image tokens to be predicted)
+            attn_mask = [1] * len(text_tokens) + [0] * len(token_batch_img[batch_idx])
+
+            # Prepare labels (ignore text tokens by setting them to -100)
+            label = [-100] * len(text_tokens) + token_batch_img[batch_idx].tolist()
+
+            input_ids.append(combined_tokens)
+            attention_masks.append(attn_mask)
+            labels.append(label)
+        # Pad sequences to max length in batch
+        input_ids = torch.nn.utils.rnn.pad_sequence([torch.tensor(seq) for seq in input_ids], batch_first=True, padding_value=self.tokenizer.pad_token_id).to(self.device)
+        attention_masks = torch.nn.utils.rnn.pad_sequence([torch.tensor(mask) for mask in attention_masks], batch_first=True, padding_value=0).to(self.device)
+        labels = torch.nn.utils.rnn.pad_sequence([torch.tensor(lbl) for lbl in labels], batch_first=True, padding_value=-100).to(self.device)
 
         # Forward pass through the model
-        outputs = self.model(input_ids=input_ids, labels=labels)
+        outputs = self.model(input_ids=input_ids, attention_mask=attention_masks, labels=labels)
 
         return outputs
 
     def training_step(self, batch, batch_idx):
-        outputs = self.forward(batch.img, [" ".join(text) for text in batch.gt_txt])
+        outputs = self.forward(batch.img, batch.gt_txt[0])
         loss = outputs.loss
         # Log training loss
         self.log('train_loss', loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
@@ -135,8 +131,7 @@ class CustomT5Model(pl.LightningModule):
         return loss
 
     def validation_step(self, batch, batch_idx):
-        # Each gt has 5.
-        outputs = self.forward(batch.img, [" ".join(text) for text in batch.gt_txt])
+        outputs = self.forward(batch.img, batch.gt_txt[0])
         loss = outputs.loss
         # Log validation loss
         self.log('val_loss', loss, on_epoch=True, prog_bar=True, logger=True)
@@ -146,7 +141,7 @@ class CustomT5Model(pl.LightningModule):
         optimizer = torch.optim.AdamW(self.model.parameters(), lr=1e-5)
 
         # Using StepLR as an example, adjust parameters as needed
-        scheduler = StepLR(optimizer, step_size=1000, gamma=0.9)
+        scheduler = StepLR(optimizer, step_size=2, gamma=0.1)
 
         # If you want to use ReduceLROnPlateau
         # scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=2, verbose=True)
@@ -174,6 +169,7 @@ if __name__ == "__main__":
     config = T5Config.from_pretrained('t5-small')
     model = T5ForConditionalGeneration.from_pretrained('t5-small')
 
+    pdb.set_trace()
     original_num_tokens = config.vocab_size
     cfg.original_num_tokens = original_num_tokens
     resize_tok_embeddings(model, original_num_tokens + vqgan_n_embed, original_num_tokens)
